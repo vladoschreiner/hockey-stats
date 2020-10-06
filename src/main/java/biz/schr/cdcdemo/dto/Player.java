@@ -1,17 +1,36 @@
 package biz.schr.cdcdemo.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Player
         implements Serializable {
 
-    private long playerId;
+    @JsonProperty("hracid")
+    public Long playerId;
 
-    private String firstName;
+    @JsonProperty("jmeno")
+    public String firstName;
 
-    private String lastName;
+    @JsonProperty("prijmeni")
+    public String lastName;
 
-    private long goals;
+    /**
+     * List of Roster records, each with a goal count
+     */
+    public List<Roster> rosters = new ArrayList<>();
+
+    /**
+     * Goal count cache
+     */
+    public int goals = 0;
+
+
+    public Player() {
+    }
 
     public Player(long playerId, String firstName, String lastName) {
         this.playerId = playerId;
@@ -19,41 +38,50 @@ public class Player
         this.lastName = lastName;
     }
 
-
-    public long getPlayerId() {
-        return playerId;
+    /**
+     * Update player form a previous version
+     */
+    public void updateFrom(Player oldPlayer) {
+        rosters = new ArrayList<>(oldPlayer.rosters);
+        goals = oldPlayer.goals;
     }
 
-    public void setPlayerId(long playerId) {
-        this.playerId = playerId;
+    /**
+     * Add new roster to this Player.
+     * Creating a new Player object;
+     */
+    public Player addRoster(Roster newRoster) {
+        Player newPlayer = new Player(playerId, firstName, lastName);
+
+        boolean updated = false;
+        for (Roster roster : rosters) {
+
+            if (roster.rosterId.equals(newRoster.rosterId)) { // Update previous value
+                newPlayer.rosters.add(newRoster);
+                newPlayer.goals += newRoster.goalCount;
+                updated = true;
+            } else { // copy previous rosters
+                newPlayer.rosters.add(roster);
+                newPlayer.goals += roster.goalCount;
+            }
+        }
+
+        // add a new roster
+        if (!updated) {
+            newPlayer.rosters.add(newRoster);
+            newPlayer.goals += newRoster.goalCount;
+        }
+
+        return newPlayer;
     }
 
-    public String getFirstName() {
-        return firstName;
-    }
 
-    public void setFirstName(String firstName) {
-        this.firstName = firstName;
-    }
-
-    public String getLastName() {
-        return lastName;
-    }
-
-    public void setLastName(String lastName) {
-        this.lastName = lastName;
-    }
-
-    public long getGoals() {
-        return goals;
-    }
-
-    public void setGoals(Long goals) {
-        this.goals = goals;
+    public Long getGoals() {
+        return Long.valueOf(goals);
     }
 
     @Override
     public String toString() {
-        return getFirstName() + " " + getLastName() + ": " + getGoals() + " goals";
+        return firstName + ' ' + lastName + ": " + goals + " goals";
     }
 }

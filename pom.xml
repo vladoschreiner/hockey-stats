@@ -10,12 +10,11 @@
 
     <properties>
         <jdk.version>1.8</jdk.version>
-        <hazelcast-jet.version>4.2</hazelcast-jet.version>
+        <hazelcast-jet.version>4.3</hazelcast-jet.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.plugin.version>2.5.1</maven.compiler.plugin.version>
         <maven-jar-plugin.version>3.2.0</maven-jar-plugin.version>
         <maven-assembly-plugin.version>3.2.0</maven-assembly-plugin.version>
-        <debezium-connector-mysql.version>1.0.0.Final</debezium-connector-mysql.version>
     </properties>
 
     <dependencies>
@@ -35,17 +34,7 @@
             <artifactId>hazelcast-jet-cdc-mysql</artifactId>
             <version>${hazelcast-jet.version}</version>
         </dependency>
-        <!--
-                <dependency>
-                    <groupId>com.hazelcast.jet.contrib</groupId>
-                    <artifactId>debezium</artifactId>
-                    <version>${debezium-jet.version}</version>
-                </dependency>
-        <dependency>
-            <groupId>io.debezium</groupId>
-            <artifactId>debezium-connector-mysql</artifactId>
-            <version>${debezium-connector-mysql.version}</version>
-        </dependency>-->
+
     </dependencies>
 
     <repositories>
