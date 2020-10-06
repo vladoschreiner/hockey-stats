@@ -1,15 +1,9 @@
 package biz.schr.cdcdemo;
 
-import biz.schr.cdcdemo.dto.Player;
-import biz.schr.cdcdemo.loader.PlayerMapLoader;
-import biz.schr.cdcdemo.loader.RosterMapLoader;
-import biz.schr.cdcdemo.util.Constants;
-import com.hazelcast.config.MapStoreConfig;
 import com.hazelcast.jet.Jet;
 import com.hazelcast.jet.JetInstance;
 import com.hazelcast.jet.cdc.ParsingException;
 import com.hazelcast.jet.config.JetConfig;
-import com.hazelcast.map.IMap;
 
 public class Starter {
 

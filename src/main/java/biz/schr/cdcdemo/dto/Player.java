@@ -6,8 +6,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-public class Player
-        implements Serializable {
+public class Player implements Serializable {
 
     @JsonProperty("hracid")
     public Long playerId;

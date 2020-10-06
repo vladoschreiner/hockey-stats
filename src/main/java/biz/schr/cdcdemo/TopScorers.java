@@ -24,6 +24,7 @@ import com.hazelcast.jet.pipeline.Sinks;
 import com.hazelcast.jet.pipeline.StreamSource;
 import com.hazelcast.jet.pipeline.StreamStage;
 import com.hazelcast.jet.pipeline.WindowDefinition;
+import com.hazelcast.jet.retry.RetryStrategies;
 import io.debezium.config.Configuration;
 import com.hazelcast.jet.cdc.CdcSinks;
 import com.hazelcast.jet.cdc.ChangeRecord;
@@ -56,29 +57,9 @@ public class TopScorers {
     static Pipeline buildPipeline() throws ParsingException {
         Pipeline p = Pipeline.create();
 
-        String[] TABLE_WHITELIST = { "ahlcz5.branka", "ahlcz5.soupiska", "ahlcz5.hrac"  };
-
-        StreamSource<ChangeRecord> source = MySqlCdcSources.mysql("cdc-demo-connector")
-                                                           .setDatabaseAddress("192.168.56.101")
-                                                           .setDatabasePort(3306)
-                                                           .setDatabaseUser("dbz")
-                                                           .setDatabasePassword("dbz")
-                                                           .setClusterName("dbserver1")
-                                                           .setDatabaseWhitelist("ahlcz5")
-                                                           .setTableWhitelist(TABLE_WHITELIST)
-                                                           .setCustomProperty("include.schema.changes", "false")
-                                                           //.setReconnectBehavior(RetryStrategies.indefinitely(500))
-                                                           //.setShouldStateBeResetOnReconnect(false)
-                                                           .build();
-
         // Continuously get and parse change records
-        StreamStage<ChangeRecord> allChangeRecords = p.readFrom(source).withIngestionTimestamps();
-
-        allChangeRecords
-                .window(WindowDefinition.tumbling(5_000))
-                .aggregate(AggregateOperations.counting())
-                .writeTo(Sinks.logger(c -> c.result() + "/last 5 sec"
-                        + ""));
+        StreamStage<ChangeRecord> allChangeRecords = p.readFrom(mysqlSource())
+                .withIngestionTimestamps();
 
         StreamStage<Object> goals = allChangeRecords
                 .filter(table(GOALS_TABLE))
@@ -90,11 +71,11 @@ public class TopScorers {
                 .merge(goals)
                 .groupingKey(TopScorers::getRosterId)
                 .mapStateful(
-                    () -> new OneToManyMapper<>(Roster.class,
+                    () -> new OneToManyJoinState<>(Roster.class,
                             Goal.class,
                             Roster::updateFrom,
                             Roster::addGoal),
-                    OneToManyMapper::mapState);
+                    OneToManyJoinState::join);
 
         // join roster with players
         StreamStage<Player> playersWithGoals = allChangeRecords
@@ -103,26 +84,44 @@ public class TopScorers {
                 .merge(rosters)
                 .groupingKey(TopScorers::getPlayerId)
                 .mapStateful(
-                        () -> new OneToManyMapper<>(Player.class,
+                        () -> new OneToManyJoinState<>(Player.class,
                                 Roster.class,
                                 Player::updateFrom,
                                 Player::addRoster),
-                        OneToManyMapper::mapState);
-
-        // log the output for player Tošnar
-        playersWithGoals
-                .filter(a -> a.lastName.compareTo("Tošnar") == 0)
-                .writeTo(Sinks.logger( h -> "(" + h.playerId + ") " +   h.firstName + " " + h.lastName + ": " + h.goals));
-
+                        OneToManyJoinState::join);
 
         // update top 5
-//        playersWithGoals
-//                .map(player -> Util.entry(player.playerId, player))
-//                .rollingAggregate(TopNUnique.topNUnique(RANKING_TABLE_SIZE, ComparatorEx.comparingLong(entry -> entry.getValue().goals)))
-//                .writeTo(Sinks.logger());
+        playersWithGoals
+                .map(player -> Util.entry(player.playerId, player))
+                .rollingAggregate(TopNUnique.topNUnique(RANKING_TABLE_SIZE,
+                        ComparatorEx.comparingLong(entry -> entry.getValue().goals)))
+                .apply(TopScorers::sendUpdatesOnlyForChanges)
+                .writeTo(Sinks.logger());
                 // .writeTo(Sinks.observable(Constants.TOP_SCORERS_OBSERVABLE));
 
+
+        // simple throughput logging
+        allChangeRecords
+                .window(WindowDefinition.tumbling(5_000))
+                .aggregate(AggregateOperations.counting())
+                .writeTo(Sinks.logger(c -> c.result() + "/last 5 sec"
+                        + ""));
         return p;
+    }
+
+    private static StreamSource<ChangeRecord> mysqlSource() {
+
+        return MySqlCdcSources.mysql("cdc-demo-connector")
+                              .setDatabaseAddress(Config.dbAddress)
+                              .setDatabasePort(Config.dbPort)
+                              .setDatabaseUser(Config.dbUsername)
+                              .setDatabasePassword(Config.dbPassword)
+                              .setClusterName(Config.dbClusterName)
+                              .setDatabaseWhitelist(Config.dbDbWhitelist)
+                              .setTableWhitelist(Config.dbTableWhitelist)
+                              .setCustomProperty("include.schema.changes", "false")
+                              .setReconnectBehavior(RetryStrategies.indefinitely(5000))
+                              .build();
     }
 
     private static Long getPlayerId(Object o) {
@@ -153,7 +152,7 @@ public class TopScorers {
         return (changeRecord) -> changeRecord.table().equals(table);
     }
     
-    private static StreamStage<List<Map.Entry<Long, Long>>> sendUpdatesOnlyForChanges(StreamStage<List<Map.Entry<Long, Long>>> input) {
+    private static StreamStage<List<Map.Entry<Long, Player>>> sendUpdatesOnlyForChanges(StreamStage<List<Map.Entry<Long, Player>>> input) {
         return input.filterStateful(
                 () -> new Object[1],
                 (lastItem, item) -> {
@@ -169,5 +168,4 @@ public class TopScorers {
                 }
         );
     }
-
 }

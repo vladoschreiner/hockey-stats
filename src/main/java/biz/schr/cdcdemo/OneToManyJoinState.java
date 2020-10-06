@@ -9,7 +9,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.BiFunction;
 
 /**
  * Stateful mapper joining objects of One-to-Many relationship together.
@@ -31,7 +30,7 @@ import java.util.function.BiFunction;
  * @param <T>
  * @param <U>
  */
-public class OneToManyMapper<T, U> implements Serializable {
+public class OneToManyJoinState<T, U> implements Serializable {
 
     private final Class<?> tType;
     private final Class<?> uType;
@@ -51,7 +50,7 @@ public class OneToManyMapper<T, U> implements Serializable {
      * @param updateOneFn function to update instance of "one" with new version
      * @param mergeFn join "one" with an instance of "many"
      */
-    public OneToManyMapper(
+    public OneToManyJoinState(
             Class<?> tType, Class<?> uType,
             BiConsumerEx<T, T> updateOneFn,
             BiFunctionEx<T, U, T> mergeFn
@@ -62,7 +61,7 @@ public class OneToManyMapper<T, U> implements Serializable {
         this.mergeFn = mergeFn;
     }
 
-    public T mapState(Long key, Object item) {
+    public T join(Long key, Object item) {
         if (tType.isAssignableFrom(item.getClass())) {
             T one = (T) item;
 

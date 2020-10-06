@@ -25,7 +25,7 @@ public class Roster implements Serializable  {
     }
 
     public Roster addGoal(Goal newGoal) {
-        // goal table is append-only, so just increasiong the aggregated goal count
+        // goal table is append-only, so just increase the aggregated goal count
         Roster newRoster = new Roster(rosterId, playerId, goalCount + 1);
         return newRoster;
     }
