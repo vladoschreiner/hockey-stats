@@ -4,37 +4,25 @@ import biz.schr.cdcdemo.dto.Goal;
 import biz.schr.cdcdemo.dto.Player;
 import biz.schr.cdcdemo.dto.Roster;
 import biz.schr.cdcdemo.util.Constants;
-import biz.schr.cdcdemo.util.JSONUtils;
 import biz.schr.cdcdemo.util.TopNUnique;
 import com.hazelcast.function.ComparatorEx;
 import com.hazelcast.function.PredicateEx;
-import com.hazelcast.jet.Jet;
-import com.hazelcast.jet.JetInstance;
 import com.hazelcast.jet.Util;
 import com.hazelcast.jet.aggregate.AggregateOperations;
 import com.hazelcast.jet.cdc.ChangeRecord;
-import com.hazelcast.jet.cdc.Operation;
 import com.hazelcast.jet.cdc.ParsingException;
 import com.hazelcast.jet.cdc.mysql.MySqlCdcSources;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.config.ProcessingGuarantee;
 import com.hazelcast.jet.pipeline.Pipeline;
-import com.hazelcast.jet.pipeline.ServiceFactories;
 import com.hazelcast.jet.pipeline.Sinks;
 import com.hazelcast.jet.pipeline.StreamSource;
 import com.hazelcast.jet.pipeline.StreamStage;
 import com.hazelcast.jet.pipeline.WindowDefinition;
 import com.hazelcast.jet.retry.RetryStrategies;
-import io.debezium.config.Configuration;
-import com.hazelcast.jet.cdc.CdcSinks;
-import com.hazelcast.jet.cdc.ChangeRecord;
-import com.hazelcast.jet.cdc.mysql.MySqlCdcSources;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-
-import static com.hazelcast.function.Functions.wholeItem;
 
 /**
  * Simple Jet pipeline which consumes "goal" events from MySQL
@@ -91,13 +79,14 @@ public class TopScorers {
                         OneToManyJoinState::join);
 
         // update top 5
-        playersWithGoals
+        StreamStage<List<Map.Entry<Long, Player>>> topN = playersWithGoals
                 .map(player -> Util.entry(player.playerId, player))
                 .rollingAggregate(TopNUnique.topNUnique(RANKING_TABLE_SIZE,
                         ComparatorEx.comparingLong(entry -> entry.getValue().goals)))
-                .apply(TopScorers::sendUpdatesOnlyForChanges)
-                .writeTo(Sinks.logger());
-                // .writeTo(Sinks.observable(Constants.TOP_SCORERS_OBSERVABLE));
+                .apply(TopScorers::sendUpdatesOnlyForChanges);
+
+        topN.writeTo(Sinks.logger());
+        topN.writeTo(Sinks.observable(Constants.TOP_SCORERS_OBSERVABLE));
 
 
         // simple throughput logging
