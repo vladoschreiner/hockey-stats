@@ -48,7 +48,7 @@ public class Player
         return goals;
     }
 
-    public void setGoals(Long goals) {
+    public void setGoals(long goals) {
         this.goals = goals;
     }
 

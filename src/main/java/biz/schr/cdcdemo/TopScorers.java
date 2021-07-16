@@ -13,11 +13,15 @@ import com.hazelcast.jet.cdc.Operation;
 import com.hazelcast.jet.cdc.mysql.MySqlCdcSources;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.config.ProcessingGuarantee;
+import com.hazelcast.jet.datamodel.Tuple2;
 import com.hazelcast.jet.pipeline.Pipeline;
 import com.hazelcast.jet.pipeline.ServiceFactories;
+import com.hazelcast.jet.pipeline.Sink;
 import com.hazelcast.jet.pipeline.Sinks;
 import com.hazelcast.jet.pipeline.StreamSource;
 import com.hazelcast.jet.pipeline.StreamStage;
+import com.hazelcast.jet.retry.RetryStrategies;
+import com.hazelcast.jet.retry.RetryStrategy;
 import io.debezium.config.Configuration;
 
 import java.util.List;
@@ -45,50 +49,70 @@ public class TopScorers {
         Pipeline p = Pipeline.create();
 
         StreamSource<ChangeRecord> source = MySqlCdcSources.mysql("cdc-demo-connector")
-                                                           .setDatabaseAddress("192.168.56.101")
-                                                           .setDatabasePort(3306)
-                                                           .setDatabaseUser("dbz")
-                                                           .setDatabasePassword("dbz")
-                                                           .setClusterName("dbserver1")
-                                                           .setDatabaseWhitelist("ahlcz5")
-                                                           .setTableWhitelist("ahlcz5.branka")
-                                                           .setCustomProperty("include.schema.changes", "false")
-                                                           .build();
-
-        // DebeziumSources.cdc(getCDCConfiguration())
+                   .setDatabaseAddress(Config.dbIP)
+                   .setDatabasePort(Config.dbPort)
+                   .setDatabaseUser(Config.dbUsername)
+                   .setDatabasePassword(Config.dbPassword)
+                   .setClusterName("dbserver1")
+                   .setDatabaseWhitelist("ahlcz5")
+                   .setTableWhitelist("ahlcz5.branka")
+                   .setCustomProperty("include.schema.changes", "false")
+                   .setReconnectBehavior(RetryStrategies.indefinitely(5_000))
+                   .build();
 
         // Continuously get and parse goal records
-        p.readFrom(source)
-        .withoutTimestamps()
+        StreamStage<Map.Entry<Long, Long>> updatedGoals = p.readFrom(source)
+                   .withoutTimestamps()
 
-        .map(changeEvent -> {
-            if (Operation.INSERT == changeEvent.operation()
-                    || Operation.SYNC == changeEvent.operation()) {
-                return Long.valueOf( (int) changeEvent.value().toMap().get("soupiskaid_strelec"));
-            } else {
-                return null;
-            }
-        })
+                   .map(changeEvent -> {
+                       if (Operation.INSERT == changeEvent.operation()
+                               || Operation.SYNC == changeEvent.operation()) {
+                           return (long) (int) changeEvent.value().toMap().get("soupiskaid_strelec");
+                       } else {
+                           return null;
+                       }
+                   })
 
-         // JSON values represent goals, parse it and extract rosterId of the goal scorer
-         //.map(JSONUtils::parseJSON)
+                   // Map RosterId to PlayerId
+                   // Use the cluster cache to do the lookup. Cache is read-through to MySQL.
+                   .groupingKey(wholeItem())
+                   .mapUsingIMap(Constants.ROSTER_CACHE, (Long rosterId, Long playerId) -> playerId)
 
-         // Map RosterId to PlayerId
-         // Use the cluster cache to do the lookup. Cache is read-through to MySQL.
-         .groupingKey(wholeItem())
-         .mapUsingIMap(Constants.ROSTER_CACHE, (Long rosterId, Long playerId) -> playerId)
+                   // Update the stats for the Player
+                   .groupingKey(wholeItem())
+                   .rollingAggregate(AggregateOperations.counting());
 
-         // Update the stats for the Player
-         .groupingKey(wholeItem())
-         .rollingAggregate(AggregateOperations.counting())
+        // Update Player Cache
+        updatedGoals
+                // this is a workaround as mapWithUpdating enforces
+                // same type of Entry stream and entries of IMap it sinks to
+                .map(e -> Tuple2.tuple2(e.getKey(), e.getValue()))
+                .writeTo(updatePlayerCache()
+                );
 
-         // Update top scorer ranking
+
+        // Update top scorer ranking and push changes to subscribers
+        updatedGoals
          .rollingAggregate(TopNUnique.topNUnique(RANKING_TABLE_SIZE, ComparatorEx.comparingLong(Map.Entry::getValue)))
          .apply(TopScorers::sendUpdatesOnlyForChanges)
          .apply(TopScorers::lookupPlayers)
-
          .writeTo(Sinks.observable(Constants.TOP_SCORERS_OBSERVABLE));
         return p;
+    }
+
+    private static Sink<Tuple2<Long, Long>> updatePlayerCache() {
+        return Sinks.mapWithUpdating(
+            Constants.PLAYER_CACHE,
+            Tuple2::f0,
+            (Player player, Tuple2<Long, Long> updatedStats) -> {
+                if (player != null) {
+                    player.setGoals(updatedStats.f1());
+                    return player;
+                } else {
+                    return null;
+                }
+            }
+        );
     }
 
     private static StreamStage<List<Map.Entry<Long, Long>>> sendUpdatesOnlyForChanges(StreamStage<List<Map.Entry<Long, Long>>> input) {
@@ -111,14 +135,12 @@ public class TopScorers {
 
     private static StreamStage<List<Player>> lookupPlayers(StreamStage<List<Map.Entry<Long, Long>>> input) {
         return input.mapUsingService(ServiceFactories.<Long, Player>iMapService(Constants.PLAYER_CACHE),
-                (cache, item) -> {
-                    return item.stream().map( e ->  {
-                            Player p = cache.get( e.getKey());
-                            p.setGoals(e.getValue());
-                            return p;
-                        })
-                        .collect(Collectors.toList());
-                }
+                (cache, item) -> item.stream().map(e ->  {
+                        Player p = cache.get( e.getKey());
+                        p.setGoals(e.getValue());
+                        return p;
+                    })
+                                 .collect(Collectors.toList())
         );
     }
 }
