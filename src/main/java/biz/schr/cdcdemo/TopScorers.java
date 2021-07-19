@@ -2,18 +2,14 @@ package biz.schr.cdcdemo;
 
 import biz.schr.cdcdemo.dto.Player;
 import biz.schr.cdcdemo.util.Constants;
-import biz.schr.cdcdemo.util.JSONUtils;
 import biz.schr.cdcdemo.util.TopNUnique;
 import com.hazelcast.function.ComparatorEx;
-import com.hazelcast.jet.Jet;
-import com.hazelcast.jet.JetInstance;
 import com.hazelcast.jet.aggregate.AggregateOperations;
 import com.hazelcast.jet.cdc.ChangeRecord;
 import com.hazelcast.jet.cdc.Operation;
 import com.hazelcast.jet.cdc.mysql.MySqlCdcSources;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.config.ProcessingGuarantee;
-import com.hazelcast.jet.datamodel.Tuple2;
 import com.hazelcast.jet.pipeline.Pipeline;
 import com.hazelcast.jet.pipeline.ServiceFactories;
 import com.hazelcast.jet.pipeline.Sink;
@@ -21,8 +17,6 @@ import com.hazelcast.jet.pipeline.Sinks;
 import com.hazelcast.jet.pipeline.StreamSource;
 import com.hazelcast.jet.pipeline.StreamStage;
 import com.hazelcast.jet.retry.RetryStrategies;
-import com.hazelcast.jet.retry.RetryStrategy;
-import io.debezium.config.Configuration;
 
 import java.util.List;
 import java.util.Map;
@@ -83,13 +77,7 @@ public class TopScorers {
                    .rollingAggregate(AggregateOperations.counting());
 
         // Update Player Cache
-        updatedGoals
-                // this is a workaround as mapWithUpdating enforces
-                // same type of Entry stream and entries of IMap it sinks to
-                .map(e -> Tuple2.tuple2(e.getKey(), e.getValue()))
-                .writeTo(updatePlayerCache()
-                );
-
+        updatedGoals.writeTo(updatePlayerCache());
 
         // Update top scorer ranking and push changes to subscribers
         updatedGoals
@@ -100,18 +88,18 @@ public class TopScorers {
         return p;
     }
 
-    private static Sink<Tuple2<Long, Long>> updatePlayerCache() {
+    private static Sink<Map.Entry<Long, Long>> updatePlayerCache() {
         return Sinks.mapWithUpdating(
-            Constants.PLAYER_CACHE,
-            Tuple2::f0,
-            (Player player, Tuple2<Long, Long> updatedStats) -> {
-                if (player != null) {
-                    player.setGoals(updatedStats.f1());
-                    return player;
-                } else {
+                Constants.PLAYER_CACHE,
+                e -> e.getKey(),
+                (Player player, Map.Entry<Long, Long> updatedStats) -> {
+                    if (player != null && updatedStats != null) {
+                        player.setGoals(updatedStats.getValue());
+                        return player;
+                    }
+
                     return null;
                 }
-            }
         );
     }
 
@@ -139,8 +127,7 @@ public class TopScorers {
                         Player p = cache.get( e.getKey());
                         p.setGoals(e.getValue());
                         return p;
-                    })
-                                 .collect(Collectors.toList())
+                    }).collect(Collectors.toList())
         );
     }
 }
