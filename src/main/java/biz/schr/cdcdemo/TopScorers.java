@@ -67,6 +67,9 @@ public class TopScorers {
                        }
                    })
 
+                    // just goals with attached player. Some goals don't have an associated scorer
+                    .filter(rosterId -> rosterId > 0)
+
                    // Map RosterId to PlayerId
                    // Use the cluster cache to do the lookup. Cache is read-through to MySQL.
                    .groupingKey(wholeItem())
